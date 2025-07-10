@@ -4,284 +4,60 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenWebUI for Teams</title>
-    <script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js" crossorigin="anonymous"></script>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        #app-frame {
-            width: 100%;
-            height: 100vh;
-            border: none;
-            display: block;
-        }
-        
+        body { margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #app-frame { width: 100%; height: 100vh; border: none; display: block; }
         #loading {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            z-index: 1000;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center; z-index: 1000;
         }
-        
         .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #0078d4;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 16px;
+            width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #0078d4;
+            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px;
         }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .hidden {
-            display: none !important;
-        }
-        
-        .auth-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 255, 255, 0.95);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 2000;
-        }
-        
-        .auth-card {
-            background: white;
-            padding: 32px;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-            text-align: center;
-            max-width: 400px;
-        }
-        
-        .auth-button {
-            background: #0078d4;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-top: 16px;
-        }
-        
-        .auth-button:hover {
-            background: #106ebe;
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
-    <!-- 加载提示 -->
     <div id="loading">
         <div class="spinner"></div>
-        <p>正在初始化 Teams 应用...</p>
-        <small id="status">检测环境中...</small>
+        <p>正在加载应用...</p>
     </div>
     
-    <!-- 认证覆盖层 -->
-    <div id="auth-overlay" class="auth-overlay hidden">
-        <div class="auth-card">
-            <h3>需要登录</h3>
-            <p>请点击下方按钮使用 Microsoft 账户登录</p>
-            <button id="auth-button" class="auth-button">使用 Microsoft 登录</button>
-        </div>
-    </div>
-    
-    <!-- 主应用iframe -->
-    <iframe id="app-frame" 
-            src="about:blank"
-            title="OpenWebUI Chatbot">
-    </iframe>
+    <iframe id="app-frame" src="https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io"></iframe>
     
     <script>
-        console.log('Teams Wrapper initializing...');
+        const urlParams = new URLSearchParams(window.location.search);
+        const isTeamsMode = urlParams.get('teams') === 'true';
         
-        let teamsContext = null;
-        let isAuthenticated = false;
+        console.log('Teams模式:', isTeamsMode);
         
-        function updateStatus(message) {
-            const statusEl = document.getElementById('status');
-            if (statusEl) {
-                statusEl.textContent = message;
-            }
-            console.log('Status:', message);
-        }
-        
-        function hideLoading() {
-            document.getElementById('loading').classList.add('hidden');
-        }
-        
-        function showAuthOverlay() {
-            document.getElementById('auth-overlay').classList.remove('hidden');
-        }
-        
-        function hideAuthOverlay() {
-            document.getElementById('auth-overlay').classList.add('hidden');
-        }
-        
-        function loadMainApp(token = null) {
-            const appFrame = document.getElementById('app-frame');
-            let url = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
-            
-            if (token) {
-                // 如果有token，可以通过URL参数传递或使用postMessage
-                url += `?teams_token=${encodeURIComponent(token)}`;
-            }
-            
-            appFrame.src = url;
-            hideLoading();
-            hideAuthOverlay();
-        }
-        
-        // 检查是否在Teams环境中
-        const isInTeams = (function() {
-            try {
-                return window.parent !== window.self || 
-                       navigator.userAgent.includes('Teams') ||
-                       window.location.href.includes('teams.microsoft.com') ||
-                       document.referrer.includes('teams.microsoft.com');
-            } catch (e) {
-                return true;
-            }
-        })();
-        
-        console.log('Is in Teams environment:', isInTeams);
-        
-        if (isInTeams) {
-            updateStatus('初始化 Teams SDK...');
-            
-            if (typeof microsoftTeams === 'undefined') {
-                console.error('Teams SDK not loaded');
-                loadMainApp(); // 降级到直接加载
-                return;
-            }
-            
-            try {
+        if (isTeamsMode) {
+            // Teams环境：加载Teams SDK
+            const script = document.createElement('script');
+            script.src = 'https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js';
+            script.onload = function() {
                 microsoftTeams.initialize(() => {
-                    console.log("Teams SDK initialized");
-                    updateStatus('获取 Teams 上下文...');
-                    
-                    // 获取Teams上下文
-                    microsoftTeams.getContext((context) => {
-                        teamsContext = context;
-                        console.log('Teams context:', context);
-                        updateStatus('尝试 SSO 认证...');
-                        
-                        // 尝试获取SSO token
-                        microsoftTeams.authentication.getAuthToken({
-                            successCallback: function(token) {
-                                console.log('SSO token obtained:', token.substring(0, 20) + '...');
-                                updateStatus('认证成功');
-                                isAuthenticated = true;
-                                
-                                // 通知Teams应用已准备好
-                                microsoftTeams.appInitialization.notifyAppLoaded();
-                                microsoftTeams.appInitialization.notifySuccess();
-                                
-                                // 加载主应用并传递token
-                                loadMainApp(token);
-                            },
-                            failureCallback: function(error) {
-                                console.log('SSO failed:', error);
-                                updateStatus('需要手动登录');
-                                
-                                // SSO失败，显示手动登录按钮
-                                hideLoading();
-                                showAuthOverlay();
-                                
-                                // 仍然通知Teams应用已加载
-                                microsoftTeams.appInitialization.notifyAppLoaded();
-                                microsoftTeams.appInitialization.notifySuccess();
-                            },
-                            silent: false // 首次尝试允许弹窗
-                        });
-                    });
+                    microsoftTeams.appInitialization.notifyAppLoaded();
+                    microsoftTeams.appInitialization.notifySuccess();
+                    document.getElementById('loading').classList.add('hidden');
                 });
-                
-            } catch (error) {
-                console.error('Teams initialization failed:', error);
-                loadMainApp(); // 降级到直接加载
-            }
-            
+            };
+            script.onerror = function() {
+                document.getElementById('loading').classList.add('hidden');
+            };
+            document.head.appendChild(script);
         } else {
-            updateStatus('重定向到主应用...');
-            setTimeout(() => {
-                window.location.href = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
-            }, 1000);
+            // 普通浏览器：直接重定向
+            window.location.href = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
         }
         
-        // 手动登录按钮点击事件
-        document.getElementById('auth-button').addEventListener('click', function() {
-            updateStatus('打开登录窗口...');
-            
-            microsoftTeams.authentication.authenticate({
-                url: 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/oauth/microsoft/login',
-                width: 600,
-                height: 535,
-                successCallback: function(result) {
-                    console.log('Manual auth success:', result);
-                    isAuthenticated = true;
-                    loadMainApp();
-                },
-                failureCallback: function(reason) {
-                    console.log('Manual auth failed:', reason);
-                    alert('登录失败，请重试');
-                }
-            });
-        });
-        
-        // 监听来自iframe的消息
-        window.addEventListener('message', function(event) {
-            if (event.origin !== 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io') {
-                return;
-            }
-            
-            if (event.data && event.data.type === 'auth-required' && !isAuthenticated) {
-                console.log('Auth required from iframe');
-                showAuthOverlay();
-            }
-            
-            if (event.data && event.data.type === 'auth-success') {
-                console.log('Auth success from iframe');
-                isAuthenticated = true;
-                hideAuthOverlay();
-            }
-        });
-        
-        // iframe加载事件
-        document.getElementById('app-frame').addEventListener('load', function() {
-            console.log('App iframe loaded');
-        });
-        
-        // 超时保护
+        // 5秒超时保护
         setTimeout(() => {
-            if (!document.getElementById('loading').classList.contains('hidden')) {
-                console.log('Timeout, loading main app anyway');
-                loadMainApp();
-            }
-        }, 15000);
+            document.getElementById('loading').classList.add('hidden');
+        }, 5000);
     </script>
 </body>
 </html>
