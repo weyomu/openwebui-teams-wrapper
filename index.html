@@ -5,59 +5,366 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenWebUI for Teams</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        body { 
+            margin: 0; padding: 0; overflow: hidden; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        }
         #app-frame { width: 100%; height: 100vh; border: none; display: block; }
         #loading {
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            text-align: center; z-index: 1000;
+            background: white; padding: 30px; border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15); text-align: center; z-index: 1000;
+            max-width: 400px; min-width: 300px;
         }
         .spinner {
-            width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #0078d4;
-            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px;
+            width: 50px; height: 50px; border: 4px solid #f3f3f3; 
+            border-top: 4px solid #0078d4; border-radius: 50%; 
+            animation: spin 1s linear infinite; margin: 0 auto 20px;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .hidden { display: none !important; }
+        
+        .teams-login {
+            background: white; padding: 40px; border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15); text-align: center;
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 2000; max-width: 450px; min-width: 350px;
+        }
+        
+        .login-title { 
+            color: #323130; font-size: 24px; font-weight: 600; 
+            margin-bottom: 16px; 
+        }
+        .login-subtitle { 
+            color: #605e5c; font-size: 16px; margin-bottom: 32px; 
+            line-height: 1.4; 
+        }
+        
+        .auth-button {
+            background: #0078d4; color: white; border: none; 
+            padding: 14px 24px; border-radius: 6px; cursor: pointer; 
+            font-size: 16px; font-weight: 600; margin: 8px; 
+            min-width: 200px; transition: background 0.2s;
+        }
+        .auth-button:hover { background: #106ebe; }
+        .auth-button:disabled { 
+            background: #c8c8c8; cursor: not-allowed; 
+        }
+        
+        .status-text { 
+            margin-top: 20px; padding: 12px; background: #f3f2f1; 
+            border-radius: 6px; font-size: 14px; color: #605e5c; 
+        }
+        .error-text { background: #fdf2f2; color: #d13438; }
+        .success-text { background: #f3f9f1; color: #107c10; }
+        
+        .direct-link {
+            margin-top: 24px; padding-top: 24px; 
+            border-top: 1px solid #edebe9; font-size: 14px;
+        }
+        .direct-link a {
+            color: #0078d4; text-decoration: none; font-weight: 600;
+        }
+        .direct-link a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
+    <!-- 初始加载界面 -->
     <div id="loading">
         <div class="spinner"></div>
-        <p>正在加载应用...</p>
+        <h3 style="color: #323130; margin: 0 0 16px 0;">正在初始化应用</h3>
+        <p id="loading-status" style="color: #605e5c; margin: 0;">检测运行环境...</p>
     </div>
     
-    <iframe id="app-frame" src="https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io"></iframe>
+    <!-- Teams登录界面 -->
+    <div id="teams-login" class="teams-login hidden">
+        <div class="login-title">OpenWebUI 登录</div>
+        <div class="login-subtitle">在Microsoft Teams中使用AI聊天助手</div>
+        
+        <div style="margin: 24px 0;">
+            <button id="sso-login-btn" class="auth-button">
+                <span>🔐</span> 使用Teams账户登录
+            </button>
+        </div>
+        
+        <div style="margin: 16px 0;">
+            <button id="popup-login-btn" class="auth-button" style="background: #6b69d6;">
+                <span>🪟</span> 弹窗登录
+            </button>
+        </div>
+        
+        <div id="auth-status" class="status-text hidden"></div>
+        
+        <div class="direct-link">
+            <div>遇到问题？</div>
+            <a href="https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io" target="_blank">
+                在新窗口中打开OpenWebUI
+            </a>
+        </div>
+    </div>
+    
+    <!-- 主应用框架 -->
+    <iframe id="app-frame" src="about:blank" title="OpenWebUI"></iframe>
     
     <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        const isTeamsMode = urlParams.get('teams') === 'true';
+        // 全局变量
+        let isTeamsEnvironment = false;
+        let teamsSDKLoaded = false;
+        let authInProgress = false;
         
-        console.log('Teams模式:', isTeamsMode);
-        
-        if (isTeamsMode) {
-            // Teams环境：加载Teams SDK
-            const script = document.createElement('script');
-            script.src = 'https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js';
-            script.onload = function() {
-                microsoftTeams.initialize(() => {
-                    microsoftTeams.appInitialization.notifyAppLoaded();
-                    microsoftTeams.appInitialization.notifySuccess();
-                    document.getElementById('loading').classList.add('hidden');
-                });
-            };
-            script.onerror = function() {
-                document.getElementById('loading').classList.add('hidden');
-            };
-            document.head.appendChild(script);
-        } else {
-            // 普通浏览器：直接重定向
-            window.location.href = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
+        // 日志函数
+        function log(message, level = 'INFO') {
+            const timestamp = new Date().toISOString().substr(11, 8);
+            console.log(`[${timestamp}] [${level}] ${message}`);
         }
         
-        // 5秒超时保护
-        setTimeout(() => {
+        // 状态更新函数
+        function updateLoadingStatus(message) {
+            const statusEl = document.getElementById('loading-status');
+            if (statusEl) statusEl.textContent = message;
+            log(message);
+        }
+        
+        function updateAuthStatus(message, type = 'info') {
+            const statusEl = document.getElementById('auth-status');
+            if (statusEl) {
+                statusEl.textContent = message;
+                statusEl.className = `status-text ${type === 'error' ? 'error-text' : type === 'success' ? 'success-text' : ''}`;
+                statusEl.classList.remove('hidden');
+            }
+            log(message, type.toUpperCase());
+        }
+        
+        // 界面控制函数
+        function hideLoading() {
             document.getElementById('loading').classList.add('hidden');
-        }, 5000);
+        }
+        
+        function showTeamsLogin() {
+            hideLoading();
+            document.getElementById('teams-login').classList.remove('hidden');
+        }
+        
+        function hideTeamsLogin() {
+            document.getElementById('teams-login').classList.add('hidden');
+        }
+        
+        function showMainApp() {
+            hideLoading();
+            hideTeamsLogin();
+            const iframe = document.getElementById('app-frame');
+            iframe.src = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
+            log('加载主应用');
+        }
+        
+        // 环境检测
+        function detectEnvironment() {
+            const userAgent = navigator.userAgent;
+            const currentURL = window.location.href;
+            const referrer = document.referrer;
+            const isInIframe = window.parent !== window.self;
+            const hasTeamsParam = new URLSearchParams(window.location.search).get('teams') === 'true';
+            
+            log(`用户代理: ${userAgent}`);
+            log(`当前URL: ${currentURL}`);
+            log(`引用页: ${referrer}`);
+            log(`在iframe中: ${isInIframe}`);
+            log(`Teams参数: ${hasTeamsParam}`);
+            
+            // 判断是否在Teams环境中
+            const isTeamsUA = userAgent.includes('Teams') || userAgent.includes('SkypeTeams');
+            const isTeamsReferrer = referrer.includes('teams.microsoft.com') || referrer.includes('teams.live.com');
+            
+            isTeamsEnvironment = hasTeamsParam || isTeamsUA || isTeamsReferrer || 
+                               (isInIframe && (isTeamsUA || isTeamsReferrer));
+            
+            log(`Teams环境检测结果: ${isTeamsEnvironment}`);
+            return isTeamsEnvironment;
+        }
+        
+        // Teams SDK加载
+        function loadTeamsSDK() {
+            return new Promise((resolve, reject) => {
+                updateLoadingStatus('加载Teams SDK...');
+                
+                const script = document.createElement('script');
+                script.src = 'https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js';
+                script.onload = () => {
+                    teamsSDKLoaded = true;
+                    log('Teams SDK加载成功');
+                    resolve();
+                };
+                script.onerror = () => {
+                    log('Teams SDK加载失败', 'ERROR');
+                    reject(new Error('Teams SDK加载失败'));
+                };
+                document.head.appendChild(script);
+            });
+        }
+        
+        // Teams初始化
+        function initializeTeams() {
+            return new Promise((resolve, reject) => {
+                updateLoadingStatus('初始化Teams...');
+                
+                try {
+                    microsoftTeams.initialize(() => {
+                        log('Teams初始化成功');
+                        
+                        // 通知Teams应用已加载
+                        microsoftTeams.appInitialization.notifyAppLoaded();
+                        microsoftTeams.appInitialization.notifySuccess();
+                        log('已通知Teams应用状态');
+                        
+                        resolve();
+                    });
+                } catch (error) {
+                    log(`Teams初始化失败: ${error.message}`, 'ERROR');
+                    reject(error);
+                }
+            });
+        }
+        
+        // Teams SSO登录
+        function performTeamsSSO() {
+            if (!teamsSDKLoaded || authInProgress) return;
+            
+            authInProgress = true;
+            updateAuthStatus('正在执行Teams SSO登录...', 'info');
+            
+            // 禁用按钮
+            document.getElementById('sso-login-btn').disabled = true;
+            document.getElementById('popup-login-btn').disabled = true;
+            
+            microsoftTeams.authentication.getAuthToken({
+                successCallback: function(token) {
+                    log(`SSO成功，token长度: ${token.length}`);
+                    updateAuthStatus('登录成功，正在跳转...', 'success');
+                    
+                    // 延迟一下再跳转，让用户看到成功消息
+                    setTimeout(() => {
+                        showMainApp();
+                    }, 1500);
+                },
+                failureCallback: function(error) {
+                    log(`SSO失败: ${JSON.stringify(error)}`, 'ERROR');
+                    updateAuthStatus(`SSO登录失败: ${error.message || '未知错误'}`, 'error');
+                    
+                    // 重新启用按钮
+                    authInProgress = false;
+                    document.getElementById('sso-login-btn').disabled = false;
+                    document.getElementById('popup-login-btn').disabled = false;
+                },
+                silent: false
+            });
+        }
+        
+        // 弹窗登录
+        function performPopupLogin() {
+            if (!teamsSDKLoaded || authInProgress) return;
+            
+            authInProgress = true;
+            updateAuthStatus('正在打开登录窗口...', 'info');
+            
+            // 禁用按钮
+            document.getElementById('sso-login-btn').disabled = true;
+            document.getElementById('popup-login-btn').disabled = true;
+            
+            microsoftTeams.authentication.authenticate({
+                url: 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/auth',
+                width: 600,
+                height: 535,
+                successCallback: function(result) {
+                    log(`弹窗登录成功: ${result}`);
+                    updateAuthStatus('登录成功，正在跳转...', 'success');
+                    
+                    setTimeout(() => {
+                        showMainApp();
+                    }, 1500);
+                },
+                failureCallback: function(reason) {
+                    log(`弹窗登录失败: ${reason}`, 'ERROR');
+                    updateAuthStatus(`登录失败: ${reason}`, 'error');
+                    
+                    // 重新启用按钮
+                    authInProgress = false;
+                    document.getElementById('sso-login-btn').disabled = false;
+                    document.getElementById('popup-login-btn').disabled = false;
+                }
+            });
+        }
+        
+        // 主初始化流程
+        async function initialize() {
+            log('应用开始初始化');
+            
+            // 检测环境
+            const isTeams = detectEnvironment();
+            
+            if (isTeams) {
+                updateLoadingStatus('检测到Teams环境');
+                
+                try {
+                    // 加载Teams SDK
+                    await loadTeamsSDK();
+                    
+                    // 初始化Teams
+                    await initializeTeams();
+                    
+                    updateLoadingStatus('尝试自动SSO登录...');
+                    
+                    // 尝试静默SSO
+                    microsoftTeams.authentication.getAuthToken({
+                        successCallback: function(token) {
+                            log(`自动SSO成功，token长度: ${token.length}`);
+                            updateLoadingStatus('自动登录成功，正在加载...');
+                            setTimeout(() => {
+                                showMainApp();
+                            }, 1000);
+                        },
+                        failureCallback: function(error) {
+                            log(`自动SSO失败: ${JSON.stringify(error)}`);
+                            updateLoadingStatus('需要手动登录');
+                            setTimeout(() => {
+                                showTeamsLogin();
+                            }, 1000);
+                        },
+                        silent: true // 静默尝试
+                    });
+                    
+                } catch (error) {
+                    log(`Teams环境初始化失败: ${error.message}`, 'ERROR');
+                    updateLoadingStatus('初始化失败，显示登录选项');
+                    setTimeout(() => {
+                        showTeamsLogin();
+                    }, 2000);
+                }
+                
+            } else {
+                // 普通浏览器环境
+                updateLoadingStatus('检测到普通浏览器，重定向中...');
+                log('普通浏览器环境，直接重定向');
+                
+                setTimeout(() => {
+                    window.location.href = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
+                }, 1500);
+            }
+        }
+        
+        // 事件监听器
+        document.getElementById('sso-login-btn').addEventListener('click', performTeamsSSO);
+        document.getElementById('popup-login-btn').addEventListener('click', performPopupLogin);
+        
+        // 超时保护
+        setTimeout(() => {
+            if (!document.getElementById('loading').classList.contains('hidden')) {
+                log('初始化超时，显示登录界面', 'WARNING');
+                showTeamsLogin();
+            }
+        }, 15000);
+        
+        // 开始初始化
+        initialize();
     </script>
 </body>
 </html>
