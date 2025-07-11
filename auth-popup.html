@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - OpenWebUI</title>
+    <title>Login - OpenWebUI</title>
     <style>
         body { 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -73,15 +73,15 @@
 </head>
 <body>
     <div class="container">
-        <div class="title">登录到 OpenWebUI</div>
-        <div class="subtitle">请点击下方按钮使用您的Microsoft账户登录</div>
+        <div class="title">Login to OpenWebUI</div>
+        <div class="subtitle">Please click the button below to login with your Microsoft account</div>
         
         <button id="login-btn" class="auth-button">
-            <span>🔐</span> Microsoft 登录
+            <span>🔐</span> Microsoft Login
         </button>
         
         <div id="status" class="status info" style="display: none;">
-            正在准备登录...
+            Preparing login...
         </div>
     </div>
     
@@ -96,38 +96,38 @@
         function redirectToAuth() {
             const btn = document.getElementById('login-btn');
             btn.disabled = true;
-            showStatus('正在跳转到Microsoft登录页面...', 'info');
+            showStatus('Redirecting to Microsoft login page...', 'info');
             
-            // 构建OAuth URL
+            // Build OAuth URL
             const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname + '?success=true');
             const authUrl = `https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/oauth/microsoft/login?redirect_uri=${redirectUri}`;
             
-            console.log('重定向到:', authUrl);
+            console.log('Redirecting to:', authUrl);
             window.location.href = authUrl;
         }
         
-        // 检查是否登录成功返回
+        // Check if login was successful
         function checkAuthSuccess() {
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('success') === 'true') {
-                showStatus('登录成功！正在关闭窗口...', 'success');
+                showStatus('Login successful! Closing window...', 'success');
                 
-                // 通知父窗口认证成功
+                // Notify parent window of successful authentication
                 if (window.opener) {
                     try {
-                        // 尝试通知Teams SDK
+                        // Try to notify Teams SDK
                         if (typeof microsoftTeams !== 'undefined') {
                             microsoftTeams.authentication.notifySuccess('login-success');
                         } else {
-                            // 如果没有Teams SDK，通过postMessage通知
+                            // If no Teams SDK, notify via postMessage
                             window.opener.postMessage({ type: 'auth-success', data: 'login-success' }, '*');
                         }
                     } catch (e) {
-                        console.log('通知父窗口失败:', e);
+                        console.log('Failed to notify parent window:', e);
                     }
                 }
                 
-                // 延迟关闭窗口
+                // Delay window close
                 setTimeout(() => {
                     window.close();
                 }, 2000);
@@ -137,15 +137,15 @@
             return false;
         }
         
-        // 页面加载时检查
+        // Check on page load
         document.addEventListener('DOMContentLoaded', function() {
             if (!checkAuthSuccess()) {
-                // 如果不是成功返回，显示登录按钮
+                // If not a successful return, show login button
                 document.getElementById('login-btn').addEventListener('click', redirectToAuth);
             }
         });
         
-        // 加载Teams SDK（如果在Teams环境中）
+        // Load Teams SDK (if in Teams environment)
         if (window.parent !== window && (
             navigator.userAgent.includes('Teams') || 
             document.referrer.includes('teams.microsoft.com')
@@ -155,9 +155,9 @@
             script.onload = function() {
                 try {
                     microsoftTeams.initialize();
-                    console.log('Teams SDK已加载到弹窗页面');
+                    console.log('Teams SDK loaded in popup page');
                 } catch (e) {
-                    console.log('Teams SDK初始化失败:', e);
+                    console.log('Teams SDK initialization failed:', e);
                 }
             };
             document.head.appendChild(script);
