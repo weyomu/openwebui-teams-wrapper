@@ -144,7 +144,7 @@
         let isTeamsEnvironment = false;
         let teamsSDKLoaded = false;
         let authInProgress = false;
-        let popupCompleted = false; // 新增：跟踪弹窗是否完成
+        let popupCompleted = false;
         
         // 日志函数
         function log(message, level = 'INFO') {
@@ -167,6 +167,14 @@
                 statusEl.classList.remove('hidden');
             }
             log(message, type.toUpperCase());
+        }
+        
+        // 隐藏状态消息
+        function hideAuthStatus() {
+            const statusEl = document.getElementById('auth-status');
+            if (statusEl) {
+                statusEl.classList.add('hidden');
+            }
         }
         
         // 界面控制函数
@@ -198,12 +206,12 @@
             const stepInfo = document.querySelector('.step-info');
             
             if (popupCompleted) {
-                skipBtn.style.background = '#107c10'; // 绿色表示可以使用
+                skipBtn.style.background = '#107c10';
                 skipBtn.innerHTML = '<span>✅</span> 验证完成，点击登录';
                 stepInfo.style.background = '#f3f9f1';
                 stepInfo.style.borderLeftColor = '#107c10';
             } else {
-                skipBtn.style.background = '#6b69d6'; // 默认颜色
+                skipBtn.style.background = '#6b69d6';
                 skipBtn.innerHTML = '<span>✅</span> 我已验证，直接登录';
             }
         }
@@ -222,7 +230,6 @@
             log(`在iframe中: ${isInIframe}`);
             log(`Teams参数: ${hasTeamsParam}`);
             
-            // 判断是否在Teams环境中
             const isTeamsUA = userAgent.includes('Teams') || userAgent.includes('SkypeTeams');
             const isTeamsReferrer = referrer.includes('teams.microsoft.com') || referrer.includes('teams.live.com');
             
@@ -262,13 +269,11 @@
                     microsoftTeams.initialize(() => {
                         log('Teams初始化成功');
                         
-                        // 获取Teams上下文信息
                         microsoftTeams.getContext((context) => {
                             log(`Teams上下文: 用户=${context.userPrincipalName}, 租户=${context.tid}`);
                             log(`应用主题: ${context.theme}, 语言: ${context.locale}`);
                         });
                         
-                        // 通知Teams应用已加载
                         microsoftTeams.appInitialization.notifyAppLoaded();
                         microsoftTeams.appInitialization.notifySuccess();
                         log('已通知Teams应用状态');
@@ -289,7 +294,6 @@
             authInProgress = true;
             updateAuthStatus('正在打开验证窗口...', 'info');
             
-            // 禁用所有按钮
             setButtonsDisabled(true);
             
             microsoftTeams.authentication.authenticate({
@@ -302,27 +306,31 @@
                     popupCompleted = true;
                     updateButtonStates();
                     
-                    // 重新启用按钮
                     authInProgress = false;
                     setButtonsDisabled(false);
                     
-                    // 自动提示用户可以点击直接登录
                     setTimeout(() => {
                         updateAuthStatus('✅ 验证完成，请点击"验证完成，点击登录"按钮', 'success');
                     }, 2000);
                 },
                 failureCallback: function(reason) {
                     log(`弹窗验证失败: ${reason}`, 'ERROR');
-                    updateAuthStatus(`验证失败: ${reason}`, 'error');
                     
-                    // 重新启用按钮
+                    // 处理用户取消的情况
+                    if (reason === 'CancelledByUser' || reason.includes('cancelled') || reason.includes('canceled')) {
+                        log('用户取消了验证', 'INFO');
+                        hideAuthStatus(); // 不显示错误消息
+                    } else {
+                        updateAuthStatus(`验证失败: ${reason}`, 'error');
+                    }
+                    
                     authInProgress = false;
                     setButtonsDisabled(false);
                 }
             });
         }
         
-        // 直接登录（基于已完成的验证）
+        // 直接登录
         function directLogin() {
             log('用户选择直接登录');
             
@@ -337,12 +345,11 @@
             }, 1000);
         }
         
-        // 手动登录（账号密码）
+        // 手动登录
         function manualLogin() {
             log('用户选择手动登录');
             updateAuthStatus('跳转到登录页面...', 'info');
             
-            // 直接加载主应用，用户可以在那里手动登录
             setTimeout(() => {
                 showMainApp();
             }, 1000);
@@ -359,17 +366,13 @@
         async function initialize() {
             log('应用开始初始化');
             
-            // 检测环境
             const isTeams = detectEnvironment();
             
             if (isTeams) {
                 updateLoadingStatus('检测到Teams环境');
                 
                 try {
-                    // 加载Teams SDK
                     await loadTeamsSDK();
-                    
-                    // 初始化Teams
                     await initializeTeams();
                     
                     updateLoadingStatus('初始化完成，显示登录选项...');
@@ -386,7 +389,6 @@
                 }
                 
             } else {
-                // 普通浏览器环境
                 updateLoadingStatus('检测到普通浏览器，重定向中...');
                 log('普通浏览器环境，直接重定向');
                 
