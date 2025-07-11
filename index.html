@@ -45,11 +45,18 @@
             padding: 14px 24px; border-radius: 6px; cursor: pointer; 
             font-size: 16px; font-weight: 600; margin: 8px; 
             min-width: 200px; transition: background 0.2s;
+            display: block; width: calc(100% - 16px);
         }
         .auth-button:hover { background: #106ebe; }
         .auth-button:disabled { 
             background: #c8c8c8; cursor: not-allowed; 
         }
+        
+        .auth-button.secondary { background: #6b69d6; }
+        .auth-button.secondary:hover { background: #5a5fc7; }
+        
+        .auth-button.tertiary { background: #6c757d; }
+        .auth-button.tertiary:hover { background: #5a6268; }
         
         .status-text { 
             margin-top: 20px; padding: 12px; background: #f3f2f1; 
@@ -66,6 +73,18 @@
             color: #0078d4; text-decoration: none; font-weight: 600;
         }
         .direct-link a:hover { text-decoration: underline; }
+
+        .step-info {
+            background: #f8f9fa; border-left: 4px solid #0078d4;
+            padding: 12px 16px; margin: 20px 0; text-align: left;
+            border-radius: 0 6px 6px 0; font-size: 14px;
+        }
+        .step-info .step-title {
+            font-weight: 600; color: #0078d4; margin-bottom: 4px;
+        }
+        .step-info .step-desc {
+            color: #605e5c; line-height: 1.4;
+        }
     </style>
 </head>
 <body>
@@ -81,21 +100,29 @@
         <div class="login-title">OpenWebUI 登录</div>
         <div class="login-subtitle">在Microsoft Teams中使用AI聊天助手</div>
         
-        <div style="margin: 24px 0;">
-            <button id="sso-login-btn" class="auth-button">
-                <span>🔐</span> 使用Teams账户登录
+        <div class="step-info">
+            <div class="step-title">💡 推荐登录流程</div>
+            <div class="step-desc">
+                1. 先点击"弹窗验证"进行身份认证<br>
+                2. 认证完成后点击"我已验证，直接登录"
+            </div>
+        </div>
+        
+        <div style="margin: 20px 0;">
+            <button id="popup-login-btn" class="auth-button">
+                <span>🪟</span> 弹窗验证
             </button>
         </div>
         
         <div style="margin: 16px 0;">
-            <button id="popup-login-btn" class="auth-button" style="background: #6b69d6;">
-                <span>🪟</span> 弹窗登录
+            <button id="skip-login-btn" class="auth-button secondary">
+                <span>✅</span> 我已验证，直接登录
             </button>
         </div>
         
         <div style="margin: 16px 0;">
-            <button id="skip-login-btn" class="auth-button" style="background: #6c757d;">
-                <span>⏭️</span> 跳过登录
+            <button id="manual-login-btn" class="auth-button tertiary">
+                <span>🔑</span> 使用账号密码登录
             </button>
         </div>
         
@@ -117,6 +144,7 @@
         let isTeamsEnvironment = false;
         let teamsSDKLoaded = false;
         let authInProgress = false;
+        let popupCompleted = false; // 新增：跟踪弹窗是否完成
         
         // 日志函数
         function log(message, level = 'INFO') {
@@ -149,6 +177,7 @@
         function showTeamsLogin() {
             hideLoading();
             document.getElementById('teams-login').classList.remove('hidden');
+            updateButtonStates();
         }
         
         function hideTeamsLogin() {
@@ -161,6 +190,22 @@
             const iframe = document.getElementById('app-frame');
             iframe.src = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
             log('加载主应用');
+        }
+        
+        // 更新按钮状态
+        function updateButtonStates() {
+            const skipBtn = document.getElementById('skip-login-btn');
+            const stepInfo = document.querySelector('.step-info');
+            
+            if (popupCompleted) {
+                skipBtn.style.background = '#107c10'; // 绿色表示可以使用
+                skipBtn.innerHTML = '<span>✅</span> 验证完成，点击登录';
+                stepInfo.style.background = '#f3f9f1';
+                stepInfo.style.borderLeftColor = '#107c10';
+            } else {
+                skipBtn.style.background = '#6b69d6'; // 默认颜色
+                skipBtn.innerHTML = '<span>✅</span> 我已验证，直接登录';
+            }
         }
         
         // 环境检测
@@ -237,97 +282,77 @@
             });
         }
         
-        // Teams SSO登录
-        function performTeamsSSO() {
+        // 弹窗验证
+        function performPopupAuth() {
             if (!teamsSDKLoaded || authInProgress) return;
             
             authInProgress = true;
-            updateAuthStatus('正在执行Teams SSO登录...', 'info');
+            updateAuthStatus('正在打开验证窗口...', 'info');
             
-            // 禁用按钮
-            document.getElementById('sso-login-btn').disabled = true;
-            document.getElementById('popup-login-btn').disabled = true;
-            document.getElementById('skip-login-btn').disabled = true;
-            
-            // 使用正确的资源URI
-            microsoftTeams.authentication.getAuthToken({
-                successCallback: function(token) {
-                    log(`SSO成功，token长度: ${token.length}`);
-                    log(`Token前缀: ${token.substring(0, 50)}...`);
-                    updateAuthStatus('SSO登录成功，正在跳转...', 'success');
-                    
-                    // 延迟一下再跳转，让用户看到成功消息
-                    setTimeout(() => {
-                        showMainApp();
-                    }, 1500);
-                },
-                failureCallback: function(error) {
-                    log(`SSO失败详情: ${JSON.stringify(error, null, 2)}`, 'ERROR');
-                    
-                    let errorMessage = '未知错误';
-                    if (error && error.message) {
-                        errorMessage = error.message;
-                    } else if (typeof error === 'string') {
-                        errorMessage = error;
-                    }
-                    
-                    updateAuthStatus(`SSO登录失败: ${errorMessage}`, 'error');
-                    
-                    // 重新启用按钮
-                    authInProgress = false;
-                    document.getElementById('sso-login-btn').disabled = false;
-                    document.getElementById('popup-login-btn').disabled = false;
-                    document.getElementById('skip-login-btn').disabled = false;
-                },
-                silent: false
-                // 不指定resources参数，让Teams自动处理
-            });
-        }
-        
-        // 弹窗登录 - 使用Teams原生认证弹窗
-        function performPopupLogin() {
-            if (!teamsSDKLoaded || authInProgress) return;
-            
-            authInProgress = true;
-            updateAuthStatus('正在打开登录窗口...', 'info');
-            
-            // 禁用按钮
-            document.getElementById('sso-login-btn').disabled = true;
-            document.getElementById('popup-login-btn').disabled = true;
-            document.getElementById('skip-login-btn').disabled = true;
+            // 禁用所有按钮
+            setButtonsDisabled(true);
             
             microsoftTeams.authentication.authenticate({
                 url: 'https://yellow-pebble-05fc00400.2.azurestaticapps.net/auth-popup.html',
                 width: 600,
                 height: 535,
                 successCallback: function(result) {
-                    log(`弹窗登录成功: ${result}`);
-                    updateAuthStatus('登录成功，正在跳转...', 'success');
-                    
-                    setTimeout(() => {
-                        showMainApp();
-                    }, 1500);
-                },
-                failureCallback: function(reason) {
-                    log(`弹窗登录失败: ${reason}`, 'ERROR');
-                    updateAuthStatus(`登录失败: ${reason}`, 'error');
+                    log(`弹窗验证成功: ${result}`);
+                    updateAuthStatus('验证成功！现在可以直接登录了', 'success');
+                    popupCompleted = true;
+                    updateButtonStates();
                     
                     // 重新启用按钮
                     authInProgress = false;
-                    document.getElementById('sso-login-btn').disabled = false;
-                    document.getElementById('popup-login-btn').disabled = false;
-                    document.getElementById('skip-login-btn').disabled = false;
+                    setButtonsDisabled(false);
+                    
+                    // 自动提示用户可以点击直接登录
+                    setTimeout(() => {
+                        updateAuthStatus('✅ 验证完成，请点击"验证完成，点击登录"按钮', 'success');
+                    }, 2000);
+                },
+                failureCallback: function(reason) {
+                    log(`弹窗验证失败: ${reason}`, 'ERROR');
+                    updateAuthStatus(`验证失败: ${reason}`, 'error');
+                    
+                    // 重新启用按钮
+                    authInProgress = false;
+                    setButtonsDisabled(false);
                 }
             });
         }
         
-        // 跳过登录，直接加载应用
-        function skipLogin() {
-            log('用户选择跳过登录');
-            updateAuthStatus('跳过登录，直接加载应用...', 'info');
+        // 直接登录（基于已完成的验证）
+        function directLogin() {
+            log('用户选择直接登录');
+            
+            if (popupCompleted) {
+                updateAuthStatus('基于已完成的验证进行登录...', 'info');
+            } else {
+                updateAuthStatus('尝试直接登录...', 'info');
+            }
+            
             setTimeout(() => {
                 showMainApp();
             }, 1000);
+        }
+        
+        // 手动登录（账号密码）
+        function manualLogin() {
+            log('用户选择手动登录');
+            updateAuthStatus('跳转到登录页面...', 'info');
+            
+            // 直接加载主应用，用户可以在那里手动登录
+            setTimeout(() => {
+                showMainApp();
+            }, 1000);
+        }
+        
+        // 设置按钮禁用状态
+        function setButtonsDisabled(disabled) {
+            document.getElementById('popup-login-btn').disabled = disabled;
+            document.getElementById('skip-login-btn').disabled = disabled;
+            document.getElementById('manual-login-btn').disabled = disabled;
         }
         
         // 主初始化流程
@@ -347,26 +372,10 @@
                     // 初始化Teams
                     await initializeTeams();
                     
-                    updateLoadingStatus('尝试自动SSO登录...');
-                    
-                    // 尝试静默SSO
-                    microsoftTeams.authentication.getAuthToken({
-                        successCallback: function(token) {
-                            log(`自动SSO成功，token长度: ${token.length}`);
-                            updateLoadingStatus('自动登录成功，正在加载...');
-                            setTimeout(() => {
-                                showMainApp();
-                            }, 1000);
-                        },
-                        failureCallback: function(error) {
-                            log(`自动SSO失败: ${JSON.stringify(error)}`);
-                            updateLoadingStatus('需要手动登录');
-                            setTimeout(() => {
-                                showTeamsLogin();
-                            }, 1000);
-                        },
-                        silent: true
-                    });
+                    updateLoadingStatus('初始化完成，显示登录选项...');
+                    setTimeout(() => {
+                        showTeamsLogin();
+                    }, 1000);
                     
                 } catch (error) {
                     log(`Teams环境初始化失败: ${error.message}`, 'ERROR');
@@ -388,9 +397,9 @@
         }
         
         // 事件监听器
-        document.getElementById('sso-login-btn').addEventListener('click', performTeamsSSO);
-        document.getElementById('popup-login-btn').addEventListener('click', performPopupLogin);
-        document.getElementById('skip-login-btn').addEventListener('click', skipLogin);
+        document.getElementById('popup-login-btn').addEventListener('click', performPopupAuth);
+        document.getElementById('skip-login-btn').addEventListener('click', directLogin);
+        document.getElementById('manual-login-btn').addEventListener('click', manualLogin);
         
         // 超时保护
         setTimeout(() => {
