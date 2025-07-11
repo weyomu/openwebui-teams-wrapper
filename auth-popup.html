@@ -1,37 +1,166 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - OpenWebUI</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; margin: 20px; text-align: center; }
-        .container { max-width: 400px; margin: 0 auto; }
-        .auth-button { 
-            background: #0078d4; color: white; border: none; 
-            padding: 12px 24px; border-radius: 6px; cursor: pointer; 
-            font-size: 16px; margin: 10px; 
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 20px; 
+            text-align: center; 
+            background: #f8f9fa;
         }
-        .auth-button:hover { background: #106ebe; }
+        .container { 
+            max-width: 400px; 
+            margin: 50px auto; 
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .title {
+            color: #323130;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .subtitle {
+            color: #605e5c;
+            font-size: 16px;
+            margin-bottom: 32px;
+            line-height: 1.4;
+        }
+        .auth-button { 
+            background: #0078d4; 
+            color: white; 
+            border: none; 
+            padding: 14px 32px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            font-weight: 600;
+            margin: 10px;
+            min-width: 200px;
+            transition: background 0.2s;
+        }
+        .auth-button:hover { 
+            background: #106ebe; 
+        }
+        .auth-button:disabled {
+            background: #c8c8c8;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .status.success {
+            background: #f3f9f1;
+            color: #107c10;
+        }
+        .status.error {
+            background: #fdf2f2;
+            color: #d13438;
+        }
+        .status.info {
+            background: #f3f2f1;
+            color: #605e5c;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>登录到 OpenWebUI</h2>
-        <p>请点击下方按钮使用您的Microsoft账户登录</p>
-        <button class="auth-button" onclick="redirectToAuth()">
-            Microsoft 登录
+        <div class="title">登录到 OpenWebUI</div>
+        <div class="subtitle">请点击下方按钮使用您的Microsoft账户登录</div>
+        
+        <button id="login-btn" class="auth-button">
+            <span>🔐</span> Microsoft 登录
         </button>
+        
+        <div id="status" class="status info" style="display: none;">
+            正在准备登录...
+        </div>
     </div>
     
     <script>
-        function redirectToAuth() {
-            // 重定向到实际的OAuth端点
-            window.location.href = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/oauth/microsoft/login?redirect_uri=' + 
-                encodeURIComponent(window.location.origin + '/auth-success.html');
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = 'block';
         }
         
-        // 检查是否已经登录成功
-        if (window.location.search.includes('success')) {
-            microsoftTeams.authentication.notifySuccess('login-success');
+        function redirectToAuth() {
+            const btn = document.getElementById('login-btn');
+            btn.disabled = true;
+            showStatus('正在跳转到Microsoft登录页面...', 'info');
+            
+            // 构建OAuth URL
+            const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname + '?success=true');
+            const authUrl = `https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/oauth/microsoft/login?redirect_uri=${redirectUri}`;
+            
+            console.log('重定向到:', authUrl);
+            window.location.href = authUrl;
+        }
+        
+        // 检查是否登录成功返回
+        function checkAuthSuccess() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('success') === 'true') {
+                showStatus('登录成功！正在关闭窗口...', 'success');
+                
+                // 通知父窗口认证成功
+                if (window.opener) {
+                    try {
+                        // 尝试通知Teams SDK
+                        if (typeof microsoftTeams !== 'undefined') {
+                            microsoftTeams.authentication.notifySuccess('login-success');
+                        } else {
+                            // 如果没有Teams SDK，通过postMessage通知
+                            window.opener.postMessage({ type: 'auth-success', data: 'login-success' }, '*');
+                        }
+                    } catch (e) {
+                        console.log('通知父窗口失败:', e);
+                    }
+                }
+                
+                // 延迟关闭窗口
+                setTimeout(() => {
+                    window.close();
+                }, 2000);
+                
+                return true;
+            }
+            return false;
+        }
+        
+        // 页面加载时检查
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!checkAuthSuccess()) {
+                // 如果不是成功返回，显示登录按钮
+                document.getElementById('login-btn').addEventListener('click', redirectToAuth);
+            }
+        });
+        
+        // 加载Teams SDK（如果在Teams环境中）
+        if (window.parent !== window && (
+            navigator.userAgent.includes('Teams') || 
+            document.referrer.includes('teams.microsoft.com')
+        )) {
+            const script = document.createElement('script');
+            script.src = 'https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js';
+            script.onload = function() {
+                try {
+                    microsoftTeams.initialize();
+                    console.log('Teams SDK已加载到弹窗页面');
+                } catch (e) {
+                    console.log('Teams SDK初始化失败:', e);
+                }
+            };
+            document.head.appendChild(script);
         }
     </script>
 </body>
