@@ -114,10 +114,6 @@
             transition: background 0.2s;
         }
         .init-button:hover { background: #c82333; }
-        
-        .countdown {
-            font-size: 12px; color: #6c757d; margin-top: 8px;
-        }
     </style>
 </head>
 <body>
@@ -132,9 +128,6 @@
             <button id="force-login-btn" class="init-button">
                 🔑 Go to Login Page
             </button>
-            <div id="countdown" class="countdown">
-                Auto-continuing in <span id="countdown-number">5</span> seconds...
-            </div>
         </div>
     </div>
     
@@ -258,7 +251,6 @@
             if (initCountdown) clearInterval(initCountdown);
             
             let remaining = seconds;
-            const countdownEl = document.getElementById('countdown-number');
             
             initCountdown = setInterval(() => {
                 if (userInterrupted) {
@@ -267,7 +259,6 @@
                 }
                 
                 remaining--;
-                if (countdownEl) countdownEl.textContent = remaining;
                 
                 if (remaining <= 0) {
                     clearInterval(initCountdown);
@@ -284,8 +275,8 @@
             if (controlsEl) {
                 controlsEl.classList.remove('hidden');
                 
-                // Start 5 second countdown
-                startCountdown(5, callback);
+                // Start 1 second countdown (hidden from user)
+                startCountdown(1, callback);
             }
         }
         
