@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>登录 - OpenWebUI</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 20px; text-align: center; }
+        .container { max-width: 400px; margin: 0 auto; }
+        .auth-button { 
+            background: #0078d4; color: white; border: none; 
+            padding: 12px 24px; border-radius: 6px; cursor: pointer; 
+            font-size: 16px; margin: 10px; 
+        }
+        .auth-button:hover { background: #106ebe; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>登录到 OpenWebUI</h2>
+        <p>请点击下方按钮使用您的Microsoft账户登录</p>
+        <button class="auth-button" onclick="redirectToAuth()">
+            Microsoft 登录
+        </button>
+    </div>
+    
+    <script>
+        function redirectToAuth() {
+            // 重定向到实际的OAuth端点
+            window.location.href = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/oauth/microsoft/login?redirect_uri=' + 
+                encodeURIComponent(window.location.origin + '/auth-success.html');
+        }
+        
+        // 检查是否已经登录成功
+        if (window.location.search.includes('success')) {
+            microsoftTeams.authentication.notifySuccess('login-success');
+        }
+    </script>
+</body>
+</html>
