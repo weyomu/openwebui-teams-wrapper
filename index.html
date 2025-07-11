@@ -58,6 +58,9 @@
         .auth-button.tertiary { background: #6c757d; }
         .auth-button.tertiary:hover { background: #5a6268; }
         
+        .auth-button.warning { background: #dc3545; }
+        .auth-button.warning:hover { background: #c82333; }
+        
         .status-text { 
             margin-top: 16px; padding: 10px; background: #f3f2f1; 
             border-radius: 6px; font-size: 13px; color: #605e5c; 
@@ -97,6 +100,24 @@
         .logout-info .logout-desc {
             color: #6c6c00; line-height: 1.4;
         }
+        
+        .init-controls {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid #edebe9;
+        }
+        
+        .init-button {
+            background: #dc3545; color: white; border: none;
+            padding: 8px 16px; border-radius: 4px; cursor: pointer;
+            font-size: 13px; font-weight: 500; margin: 4px;
+            transition: background 0.2s;
+        }
+        .init-button:hover { background: #c82333; }
+        
+        .countdown {
+            font-size: 12px; color: #6c757d; margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -105,6 +126,16 @@
         <div class="spinner"></div>
         <h3 style="color: #323130; margin: 0 0 16px 0;">Initializing Application</h3>
         <p id="loading-status" style="color: #605e5c; margin: 0;">Detecting environment...</p>
+        
+        <!-- Control buttons for initialization -->
+        <div id="init-controls" class="init-controls hidden">
+            <button id="force-login-btn" class="init-button">
+                🔑 Go to Login Page
+            </button>
+            <div id="countdown" class="countdown">
+                Auto-continuing in <span id="countdown-number">5</span> seconds...
+            </div>
+        </div>
     </div>
     
     <!-- Teams login screen -->
@@ -137,6 +168,12 @@
             </button>
         </div>
         
+        <div style="margin: 12px 0;">
+            <button id="clear-auth-btn" class="auth-button warning">
+                <span>🗑️</span> Clear Auth & Retry
+            </button>
+        </div>
+        
         <div id="auth-status" class="status-text hidden"></div>
         
         <div class="direct-link">
@@ -160,6 +197,8 @@
         let isLoggedOut = false;
         let lastKnownUrl = '';
         let appLoadedSuccessfully = false;
+        let initCountdown = null;
+        let userInterrupted = false;
         
         // Authentication state management
         const AUTH_STORAGE_KEY = 'openwebui_teams_auth';
@@ -196,7 +235,6 @@
                     authenticated: authenticated
                 };
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
-                // Clear logout check when authenticated
                 localStorage.removeItem(LOGOUT_CHECK_KEY);
                 log(`Auth state stored: ${authenticated}`);
             } catch (error) {
@@ -208,27 +246,72 @@
         function clearAuthState() {
             try {
                 localStorage.removeItem(AUTH_STORAGE_KEY);
-                localStorage.setItem(LOGOUT_CHECK_KEY, Date.now().toString());
+                localStorage.removeItem(LOGOUT_CHECK_KEY);
                 log('Auth state cleared');
             } catch (error) {
                 log(`Error clearing auth state: ${error.message}`, 'ERROR');
             }
         }
         
-        // Check if logout was detected recently
-        function wasRecentlyLoggedOut() {
-            try {
-                const logoutTime = localStorage.getItem(LOGOUT_CHECK_KEY);
-                if (!logoutTime) return false;
+        // Start countdown for auto-continue
+        function startCountdown(seconds, callback) {
+            if (initCountdown) clearInterval(initCountdown);
+            
+            let remaining = seconds;
+            const countdownEl = document.getElementById('countdown-number');
+            
+            initCountdown = setInterval(() => {
+                if (userInterrupted) {
+                    clearInterval(initCountdown);
+                    return;
+                }
                 
-                const now = Date.now();
-                const timeSinceLogout = now - parseInt(logoutTime);
+                remaining--;
+                if (countdownEl) countdownEl.textContent = remaining;
                 
-                // Consider it recent if less than 5 minutes ago
-                return timeSinceLogout < (5 * 60 * 1000);
-            } catch (error) {
-                return false;
+                if (remaining <= 0) {
+                    clearInterval(initCountdown);
+                    if (!userInterrupted) {
+                        callback();
+                    }
+                }
+            }, 1000);
+        }
+        
+        // Show initialization controls
+        function showInitControls(callback) {
+            const controlsEl = document.getElementById('init-controls');
+            if (controlsEl) {
+                controlsEl.classList.remove('hidden');
+                
+                // Start 5 second countdown
+                startCountdown(5, callback);
             }
+        }
+        
+        // Hide initialization controls
+        function hideInitControls() {
+            const controlsEl = document.getElementById('init-controls');
+            if (controlsEl) {
+                controlsEl.classList.add('hidden');
+            }
+            if (initCountdown) {
+                clearInterval(initCountdown);
+                initCountdown = null;
+            }
+        }
+        
+        // Force login page
+        function forceLogin() {
+            userInterrupted = true;
+            hideInitControls();
+            log('User chose to force login page');
+            clearAuthState(); // Clear any existing auth
+            
+            updateLoadingStatus('Redirecting to login...');
+            setTimeout(() => {
+                showTeamsLogin();
+            }, 500);
         }
         
         // Enhanced iframe monitoring
@@ -242,20 +325,15 @@
                 try {
                     const currentSrc = iframe.src;
                     
-                    // Check if URL has changed to a login page
                     if (currentSrc !== lastKnownUrl) {
                         log(`Iframe URL changed from ${lastKnownUrl} to ${currentSrc}`);
                         lastKnownUrl = currentSrc;
                         
-                        // Check for login/auth pages
                         if (isLoginPage(currentSrc) && appLoadedSuccessfully) {
                             log('Login page detected after successful app load - user logged out');
                             handleLogoutDetected();
                         }
                     }
-                    
-                    // Also try to check if the iframe content shows login elements
-                    checkIframeContent(iframe);
                     
                 } catch (error) {
                     // Expected due to CORS
@@ -278,28 +356,6 @@
             return loginPatterns.some(pattern => url.includes(pattern));
         }
         
-        // Try to detect logout by checking iframe content (when possible)
-        function checkIframeContent(iframe) {
-            try {
-                // This will usually fail due to CORS, but worth trying
-                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                if (iframeDoc) {
-                    const title = iframeDoc.title.toLowerCase();
-                    const body = iframeDoc.body ? iframeDoc.body.innerHTML.toLowerCase() : '';
-                    
-                    if (title.includes('login') || title.includes('sign in') || 
-                        body.includes('login') || body.includes('sign in')) {
-                        if (appLoadedSuccessfully) {
-                            log('Login content detected in iframe');
-                            handleLogoutDetected();
-                        }
-                    }
-                }
-            } catch (error) {
-                // Expected due to CORS
-            }
-        }
-        
         // Stop frame monitoring
         function stopFrameMonitoring() {
             if (frameCheckInterval) {
@@ -310,7 +366,7 @@
         
         // Handle detected logout
         function handleLogoutDetected() {
-            if (isLoggedOut) return; // Prevent multiple triggers
+            if (isLoggedOut) return;
             
             isLoggedOut = true;
             appLoadedSuccessfully = false;
@@ -319,11 +375,9 @@
             clearAuthState();
             stopFrameMonitoring();
             
-            // Reset iframe
             const iframe = document.getElementById('app-frame');
             iframe.src = 'about:blank';
             
-            // Update UI to show logout message
             const stepInfo = document.getElementById('step-info');
             if (stepInfo) {
                 stepInfo.className = 'logout-info';
@@ -335,7 +389,6 @@
                 `;
             }
             
-            // Show login interface
             setTimeout(() => {
                 showTeamsLogin();
             }, 500);
@@ -352,7 +405,6 @@
                 if (currentSrc && currentSrc !== 'about:blank') {
                     lastKnownUrl = currentSrc;
                     
-                    // Check if this is a login page load
                     if (isLoginPage(currentSrc)) {
                         if (appLoadedSuccessfully) {
                             log('Login page loaded after app was running - logout detected');
@@ -363,7 +415,6 @@
                             }, 2000);
                         }
                     } else {
-                        // Mark app as successfully loaded if it's not a login page
                         setTimeout(() => {
                             if (!isLoginPage(iframe.src)) {
                                 appLoadedSuccessfully = true;
@@ -371,26 +422,6 @@
                             }
                         }, 3000);
                     }
-                }
-            });
-            
-            iframe.addEventListener('error', () => {
-                log('Iframe load error detected');
-            });
-        }
-        
-        // Add postMessage listener for logout detection
-        function setupPostMessageListener() {
-            window.addEventListener('message', (event) => {
-                try {
-                    if (event.data && typeof event.data === 'object') {
-                        if (event.data.type === 'logout' || event.data.action === 'logout') {
-                            log('Logout message received via postMessage');
-                            handleLogoutDetected();
-                        }
-                    }
-                } catch (error) {
-                    // Ignore invalid messages
                 }
             });
         }
@@ -428,6 +459,7 @@
         
         // UI control functions
         function hideLoading() {
+            hideInitControls();
             document.getElementById('loading').classList.add('hidden');
         }
         
@@ -435,12 +467,6 @@
             hideLoading();
             document.getElementById('teams-login').classList.remove('hidden');
             updateButtonStates();
-            
-            // Reset the step info if it was showing logout message
-            const stepInfo = document.getElementById('step-info');
-            if (stepInfo && stepInfo.className.includes('logout-info')) {
-                // Keep the logout message for better UX
-            }
         }
         
         function hideTeamsLogin() {
@@ -450,19 +476,17 @@
         function showMainApp() {
             hideLoading();
             hideTeamsLogin();
-            isLoggedOut = false; // Reset logout flag
-            appLoadedSuccessfully = false; // Will be set to true after successful load
+            isLoggedOut = false;
+            appLoadedSuccessfully = false;
             
             const iframe = document.getElementById('app-frame');
             iframe.src = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
             lastKnownUrl = iframe.src;
             log('Loading main application');
             
-            // Start monitoring for logout after a delay
             setTimeout(() => {
                 startFrameMonitoring();
                 setupIframeListener();
-                setupPostMessageListener();
             }, 2000);
         }
         
@@ -578,7 +602,6 @@
                     authInProgress = false;
                     setButtonsDisabled(false);
                     
-                    // Auto-login after successful authentication
                     setTimeout(() => {
                         showMainApp();
                     }, 1500);
@@ -627,11 +650,34 @@
             }, 1000);
         }
         
+        // Clear auth and retry
+        function clearAuthAndRetry() {
+            log('User chose to clear auth and retry');
+            clearAuthState();
+            updateAuthStatus('Authentication cleared, please try again...', 'info');
+            
+            // Reset UI to initial state
+            const stepInfo = document.getElementById('step-info');
+            if (stepInfo) {
+                stepInfo.className = 'step-info';
+                stepInfo.innerHTML = `
+                    <div class="step-title">💡 Authentication Required</div>
+                    <div class="step-desc">
+                        Please authenticate to access OpenWebUI within Teams
+                    </div>
+                `;
+            }
+            
+            popupCompleted = false;
+            updateButtonStates();
+        }
+        
         // Set button disabled state
         function setButtonsDisabled(disabled) {
             document.getElementById('popup-login-btn').disabled = disabled;
             document.getElementById('skip-login-btn').disabled = disabled;
             document.getElementById('manual-login-btn').disabled = disabled;
+            document.getElementById('clear-auth-btn').disabled = disabled;
         }
         
         // Main initialization flow
@@ -643,44 +689,29 @@
             if (isTeams) {
                 updateLoadingStatus('Teams environment detected');
                 
-                // Check if user was recently logged out
-                if (wasRecentlyLoggedOut()) {
-                    log('Recent logout detected, showing login interface');
-                    updateLoadingStatus('Session expired, please login again...');
-                    setTimeout(() => {
-                        const stepInfo = document.getElementById('step-info');
-                        if (stepInfo) {
-                            stepInfo.className = 'logout-info';
-                            stepInfo.innerHTML = `
-                                <div class="logout-title">🔄 Session Expired</div>
-                                <div class="logout-desc">
-                                    You have been logged out. Please authenticate again to continue.
-                                </div>
-                            `;
-                        }
-                        showTeamsLogin();
-                    }, 1000);
-                    return;
-                }
-                
-                // Check if already authenticated
-                if (isAlreadyAuthenticated()) {
-                    log('User already authenticated, attempting to load app');
-                    updateLoadingStatus('Already authenticated, loading app...');
-                    setTimeout(() => {
-                        showMainApp();
-                    }, 1000);
-                    return;
-                }
-                
                 try {
                     await loadTeamsSDK();
                     await initializeTeams();
                     
-                    updateLoadingStatus('Initialization complete, showing login options...');
-                    setTimeout(() => {
-                        showTeamsLogin();
-                    }, 1000);
+                    updateLoadingStatus('Initialization complete...');
+                    
+                    // Show controls and let user decide
+                    showInitControls(() => {
+                        // Auto-continue function
+                        if (isAlreadyAuthenticated()) {
+                            log('User already authenticated, loading app');
+                            updateLoadingStatus('Already authenticated, loading app...');
+                            setTimeout(() => {
+                                showMainApp();
+                            }, 1000);
+                        } else {
+                            log('No authentication found, showing login options');
+                            updateLoadingStatus('No authentication found, showing login options...');
+                            setTimeout(() => {
+                                showTeamsLogin();
+                            }, 1000);
+                        }
+                    });
                     
                 } catch (error) {
                     log(`Teams environment initialization failed: ${error.message}`, 'ERROR');
@@ -704,6 +735,8 @@
         document.getElementById('popup-login-btn').addEventListener('click', performPopupAuth);
         document.getElementById('skip-login-btn').addEventListener('click', directLogin);
         document.getElementById('manual-login-btn').addEventListener('click', manualLogin);
+        document.getElementById('clear-auth-btn').addEventListener('click', clearAuthAndRetry);
+        document.getElementById('force-login-btn').addEventListener('click', forceLogin);
         
         // Timeout protection
         setTimeout(() => {
