@@ -85,6 +85,18 @@
         .step-info .step-desc {
             color: #605e5c; line-height: 1.4;
         }
+        
+        .logout-info {
+            background: #fff3cd; border-left: 4px solid #ffc107;
+            padding: 10px 14px; margin: 16px 0; text-align: left;
+            border-radius: 0 6px 6px 0; font-size: 13px;
+        }
+        .logout-info .logout-title {
+            font-weight: 600; color: #856404; margin-bottom: 4px;
+        }
+        .logout-info .logout-desc {
+            color: #6c6c00; line-height: 1.4;
+        }
     </style>
 </head>
 <body>
@@ -100,7 +112,7 @@
         <div class="login-title">OpenWebUI Login</div>
         <div class="login-subtitle">AI Chat Assistant for Microsoft Teams</div>
         
-        <div class="step-info">
+        <div id="step-info" class="step-info">
             <div class="step-title">💡 Authentication Required</div>
             <div class="step-desc">
                 Please authenticate to access OpenWebUI within Teams
@@ -144,6 +156,8 @@
         let teamsSDKLoaded = false;
         let authInProgress = false;
         let popupCompleted = false;
+        let frameCheckInterval = null;
+        let isLoggedOut = false;
         
         // Authentication state management
         const AUTH_STORAGE_KEY = 'openwebui_teams_auth';
@@ -183,6 +197,100 @@
             } catch (error) {
                 log(`Error storing auth state: ${error.message}`, 'ERROR');
             }
+        }
+        
+        // Clear authentication state
+        function clearAuthState() {
+            try {
+                localStorage.removeItem(AUTH_STORAGE_KEY);
+                log('Auth state cleared');
+            } catch (error) {
+                log(`Error clearing auth state: ${error.message}`, 'ERROR');
+            }
+        }
+        
+        // Monitor iframe for logout detection
+        function startFrameMonitoring() {
+            if (frameCheckInterval) return;
+            
+            frameCheckInterval = setInterval(() => {
+                const iframe = document.getElementById('app-frame');
+                if (!iframe || !iframe.src || iframe.src === 'about:blank') return;
+                
+                try {
+                    // Try to access the iframe's location (will fail due to CORS, but we can check the src)
+                    const currentSrc = iframe.src;
+                    
+                    // Check if we've been redirected to a login page
+                    if (currentSrc.includes('/auth/') || 
+                        currentSrc.includes('/login') || 
+                        currentSrc.includes('signin') ||
+                        currentSrc.includes('oauth')) {
+                        
+                        log('Login page detected in iframe, user may have logged out');
+                        handleLogoutDetected();
+                    }
+                } catch (error) {
+                    // Expected due to CORS, but we can still monitor src changes
+                }
+            }, 2000);
+        }
+        
+        // Stop frame monitoring
+        function stopFrameMonitoring() {
+            if (frameCheckInterval) {
+                clearInterval(frameCheckInterval);
+                frameCheckInterval = null;
+            }
+        }
+        
+        // Handle detected logout
+        function handleLogoutDetected() {
+            if (isLoggedOut) return; // Prevent multiple triggers
+            
+            isLoggedOut = true;
+            log('Logout detected, clearing auth state and showing login interface');
+            
+            clearAuthState();
+            stopFrameMonitoring();
+            
+            // Update UI to show logout message
+            const stepInfo = document.getElementById('step-info');
+            if (stepInfo) {
+                stepInfo.className = 'logout-info';
+                stepInfo.innerHTML = `
+                    <div class="logout-title">🔄 Session Expired</div>
+                    <div class="logout-desc">
+                        You have been logged out. Please authenticate again to continue.
+                    </div>
+                `;
+            }
+            
+            // Show login interface
+            showTeamsLogin();
+        }
+        
+        // Listen for iframe load events
+        function setupIframeListener() {
+            const iframe = document.getElementById('app-frame');
+            
+            iframe.addEventListener('load', () => {
+                const currentSrc = iframe.src;
+                log(`Iframe loaded: ${currentSrc}`);
+                
+                // If we detect a login page after the main app was loaded, it's likely a logout
+                if (currentSrc.includes('/auth/') || 
+                    currentSrc.includes('/login') || 
+                    currentSrc.includes('signin')) {
+                    
+                    // Small delay to ensure it's not just an initial redirect
+                    setTimeout(() => {
+                        if (iframe.src === currentSrc) {
+                            handleLogoutDetected();
+                        }
+                    }, 1000);
+                }
+            });
         }
         
         // Logging function
@@ -234,21 +342,31 @@
         function showMainApp() {
             hideLoading();
             hideTeamsLogin();
+            isLoggedOut = false; // Reset logout flag
+            
             const iframe = document.getElementById('app-frame');
             iframe.src = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
             log('Loading main application');
+            
+            // Start monitoring for logout
+            setTimeout(() => {
+                startFrameMonitoring();
+                setupIframeListener();
+            }, 3000); // Wait a bit for the app to fully load
         }
         
         // Update button states
         function updateButtonStates() {
             const skipBtn = document.getElementById('skip-login-btn');
-            const stepInfo = document.querySelector('.step-info');
+            const stepInfo = document.getElementById('step-info');
             
             if (popupCompleted) {
                 skipBtn.style.background = '#107c10';
                 skipBtn.innerHTML = '<span>✅</span> Authentication Complete';
-                stepInfo.style.background = '#f3f9f1';
-                stepInfo.style.borderLeftColor = '#107c10';
+                if (stepInfo && !stepInfo.className.includes('logout-info')) {
+                    stepInfo.style.background = '#f3f9f1';
+                    stepInfo.style.borderLeftColor = '#107c10';
+                }
             } else {
                 skipBtn.style.background = '#6b69d6';
                 skipBtn.innerHTML = '<span>✅</span> Already Authenticated';
