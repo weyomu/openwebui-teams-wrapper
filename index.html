@@ -66,6 +66,17 @@
             color: #0078d4; text-decoration: none; font-weight: 600;
         }
         .direct-link a:hover { text-decoration: underline; }
+        
+        .auth-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 3000;
+            display: flex; justify-content: center; align-items: center;
+        }
+        
+        .auth-iframe {
+            width: 500px; height: 600px; border: none; border-radius: 8px;
+            background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body>
@@ -88,8 +99,14 @@
         </div>
         
         <div style="margin: 16px 0;">
-            <button id="popup-login-btn" class="auth-button" style="background: #6b69d6;">
-                <span>🪟</span> 弹窗登录
+            <button id="iframe-login-btn" class="auth-button" style="background: #6b69d6;">
+                <span>🔑</span> 账户登录
+            </button>
+        </div>
+        
+        <div style="margin: 16px 0;">
+            <button id="skip-login-btn" class="auth-button" style="background: #6c757d;">
+                <span>⏭️</span> 跳过登录
             </button>
         </div>
         
@@ -100,6 +117,14 @@
             <a href="https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io" target="_blank">
                 在新窗口中打开OpenWebUI
             </a>
+        </div>
+    </div>
+    
+    <!-- 内嵌登录覆盖层 -->
+    <div id="auth-overlay" class="auth-overlay hidden">
+        <div style="position: relative;">
+            <iframe id="auth-iframe" class="auth-iframe" src="about:blank"></iframe>
+            <button onclick="closeAuthOverlay()" style="position: absolute; top: -10px; right: -10px; background: #d13438; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; cursor: pointer;">✕</button>
         </div>
     </div>
     
@@ -149,9 +174,25 @@
             document.getElementById('teams-login').classList.add('hidden');
         }
         
+        function showAuthOverlay() {
+            document.getElementById('auth-overlay').classList.remove('hidden');
+        }
+        
+        function closeAuthOverlay() {
+            document.getElementById('auth-overlay').classList.add('hidden');
+            document.getElementById('auth-iframe').src = 'about:blank';
+            
+            // 重新启用按钮
+            authInProgress = false;
+            document.getElementById('sso-login-btn').disabled = false;
+            document.getElementById('iframe-login-btn').disabled = false;
+            document.getElementById('skip-login-btn').disabled = false;
+        }
+        
         function showMainApp() {
             hideLoading();
             hideTeamsLogin();
+            closeAuthOverlay();
             const iframe = document.getElementById('app-frame');
             iframe.src = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
             log('加载主应用');
@@ -211,6 +252,12 @@
                     microsoftTeams.initialize(() => {
                         log('Teams初始化成功');
                         
+                        // 获取Teams上下文信息
+                        microsoftTeams.getContext((context) => {
+                            log(`Teams上下文: 用户=${context.userPrincipalName}, 租户=${context.tid}`);
+                            log(`应用主题: ${context.theme}, 语言: ${context.locale}`);
+                        });
+                        
                         // 通知Teams应用已加载
                         microsoftTeams.appInitialization.notifyAppLoaded();
                         microsoftTeams.appInitialization.notifySuccess();
@@ -234,12 +281,14 @@
             
             // 禁用按钮
             document.getElementById('sso-login-btn').disabled = true;
-            document.getElementById('popup-login-btn').disabled = true;
+            document.getElementById('iframe-login-btn').disabled = true;
+            document.getElementById('skip-login-btn').disabled = true;
             
             microsoftTeams.authentication.getAuthToken({
                 successCallback: function(token) {
                     log(`SSO成功，token长度: ${token.length}`);
-                    updateAuthStatus('登录成功，正在跳转...', 'success');
+                    log(`Token前缀: ${token.substring(0, 50)}...`);
+                    updateAuthStatus('SSO登录成功，正在跳转...', 'success');
                     
                     // 延迟一下再跳转，让用户看到成功消息
                     setTimeout(() => {
@@ -247,51 +296,79 @@
                     }, 1500);
                 },
                 failureCallback: function(error) {
-                    log(`SSO失败: ${JSON.stringify(error)}`, 'ERROR');
-                    updateAuthStatus(`SSO登录失败: ${error.message || '未知错误'}`, 'error');
+                    log(`SSO失败详情: ${JSON.stringify(error, null, 2)}`, 'ERROR');
+                    
+                    let errorMessage = '未知错误';
+                    if (error && error.message) {
+                        errorMessage = error.message;
+                    } else if (typeof error === 'string') {
+                        errorMessage = error;
+                    }
+                    
+                    updateAuthStatus(`SSO登录失败: ${errorMessage}`, 'error');
                     
                     // 重新启用按钮
                     authInProgress = false;
                     document.getElementById('sso-login-btn').disabled = false;
-                    document.getElementById('popup-login-btn').disabled = false;
+                    document.getElementById('iframe-login-btn').disabled = false;
+                    document.getElementById('skip-login-btn').disabled = false;
                 },
-                silent: false
+                silent: false,
+                resources: ["api://5f671c90-5a16-40b5-aa8b-b10ae02cd032"]
             });
         }
         
-        // 弹窗登录
-        function performPopupLogin() {
-            if (!teamsSDKLoaded || authInProgress) return;
+        // 内嵌iframe登录
+        function performIframeLogin() {
+            if (authInProgress) return;
             
             authInProgress = true;
-            updateAuthStatus('正在打开登录窗口...', 'info');
+            updateAuthStatus('正在打开登录界面...', 'info');
             
             // 禁用按钮
             document.getElementById('sso-login-btn').disabled = true;
-            document.getElementById('popup-login-btn').disabled = true;
+            document.getElementById('iframe-login-btn').disabled = true;
+            document.getElementById('skip-login-btn').disabled = true;
             
-            microsoftTeams.authentication.authenticate({
-                url: 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/auth',
-                width: 600,
-                height: 535,
-                successCallback: function(result) {
-                    log(`弹窗登录成功: ${result}`);
-                    updateAuthStatus('登录成功，正在跳转...', 'success');
-                    
-                    setTimeout(() => {
-                        showMainApp();
-                    }, 1500);
-                },
-                failureCallback: function(reason) {
-                    log(`弹窗登录失败: ${reason}`, 'ERROR');
-                    updateAuthStatus(`登录失败: ${reason}`, 'error');
-                    
-                    // 重新启用按钮
-                    authInProgress = false;
-                    document.getElementById('sso-login-btn').disabled = false;
-                    document.getElementById('popup-login-btn').disabled = false;
+            // 显示内嵌登录iframe
+            const authIframe = document.getElementById('auth-iframe');
+            authIframe.src = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io/auth';
+            showAuthOverlay();
+            
+            // 监听iframe中的登录完成事件
+            const checkLoginStatus = setInterval(() => {
+                try {
+                    // 尝试检查iframe的URL变化（可能会因为同源策略失败）
+                    const iframeUrl = authIframe.contentWindow.location.href;
+                    if (iframeUrl.includes('ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io') && 
+                        !iframeUrl.includes('/auth') && 
+                        !iframeUrl.includes('/oauth')) {
+                        // 登录成功
+                        clearInterval(checkLoginStatus);
+                        log('iframe登录成功检测');
+                        updateAuthStatus('登录成功，正在跳转...', 'success');
+                        setTimeout(() => {
+                            showMainApp();
+                        }, 1000);
+                    }
+                } catch (e) {
+                    // 同源策略阻止，这是正常的
                 }
-            });
+            }, 1000);
+            
+            // 5分钟后停止检查
+            setTimeout(() => {
+                clearInterval(checkLoginStatus);
+            }, 300000);
+        }
+        
+        // 跳过登录，直接加载应用
+        function skipLogin() {
+            log('用户选择跳过登录');
+            updateAuthStatus('跳过登录，直接加载应用...', 'info');
+            setTimeout(() => {
+                showMainApp();
+            }, 1000);
         }
         
         // 主初始化流程
@@ -329,7 +406,8 @@
                                 showTeamsLogin();
                             }, 1000);
                         },
-                        silent: true // 静默尝试
+                        silent: true,
+                        resources: ["api://5f671c90-5a16-40b5-aa8b-b10ae02cd032"]
                     });
                     
                 } catch (error) {
@@ -351,9 +429,25 @@
             }
         }
         
+        // 监听来自iframe的消息
+        window.addEventListener('message', function(event) {
+            if (event.origin === 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io') {
+                log(`收到主应用消息: ${JSON.stringify(event.data)}`);
+                
+                if (event.data && event.data.type === 'login-success') {
+                    log('检测到登录成功消息');
+                    updateAuthStatus('登录成功！', 'success');
+                    setTimeout(() => {
+                        showMainApp();
+                    }, 1000);
+                }
+            }
+        });
+        
         // 事件监听器
         document.getElementById('sso-login-btn').addEventListener('click', performTeamsSSO);
-        document.getElementById('popup-login-btn').addEventListener('click', performPopupLogin);
+        document.getElementById('iframe-login-btn').addEventListener('click', performIframeLogin);
+        document.getElementById('skip-login-btn').addEventListener('click', skipLogin);
         
         // 超时保护
         setTimeout(() => {
