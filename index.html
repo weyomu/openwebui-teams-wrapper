@@ -158,10 +158,13 @@
         let popupCompleted = false;
         let frameCheckInterval = null;
         let isLoggedOut = false;
+        let lastKnownUrl = '';
+        let appLoadedSuccessfully = false;
         
         // Authentication state management
         const AUTH_STORAGE_KEY = 'openwebui_teams_auth';
         const AUTH_EXPIRY_HOURS = 24;
+        const LOGOUT_CHECK_KEY = 'openwebui_logout_check';
         
         // Check if user is already authenticated
         function isAlreadyAuthenticated() {
@@ -193,6 +196,8 @@
                     authenticated: authenticated
                 };
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
+                // Clear logout check when authenticated
+                localStorage.removeItem(LOGOUT_CHECK_KEY);
                 log(`Auth state stored: ${authenticated}`);
             } catch (error) {
                 log(`Error storing auth state: ${error.message}`, 'ERROR');
@@ -203,13 +208,30 @@
         function clearAuthState() {
             try {
                 localStorage.removeItem(AUTH_STORAGE_KEY);
+                localStorage.setItem(LOGOUT_CHECK_KEY, Date.now().toString());
                 log('Auth state cleared');
             } catch (error) {
                 log(`Error clearing auth state: ${error.message}`, 'ERROR');
             }
         }
         
-        // Monitor iframe for logout detection
+        // Check if logout was detected recently
+        function wasRecentlyLoggedOut() {
+            try {
+                const logoutTime = localStorage.getItem(LOGOUT_CHECK_KEY);
+                if (!logoutTime) return false;
+                
+                const now = Date.now();
+                const timeSinceLogout = now - parseInt(logoutTime);
+                
+                // Consider it recent if less than 5 minutes ago
+                return timeSinceLogout < (5 * 60 * 1000);
+            } catch (error) {
+                return false;
+            }
+        }
+        
+        // Enhanced iframe monitoring
         function startFrameMonitoring() {
             if (frameCheckInterval) return;
             
@@ -218,22 +240,64 @@
                 if (!iframe || !iframe.src || iframe.src === 'about:blank') return;
                 
                 try {
-                    // Try to access the iframe's location (will fail due to CORS, but we can check the src)
                     const currentSrc = iframe.src;
                     
-                    // Check if we've been redirected to a login page
-                    if (currentSrc.includes('/auth/') || 
-                        currentSrc.includes('/login') || 
-                        currentSrc.includes('signin') ||
-                        currentSrc.includes('oauth')) {
+                    // Check if URL has changed to a login page
+                    if (currentSrc !== lastKnownUrl) {
+                        log(`Iframe URL changed from ${lastKnownUrl} to ${currentSrc}`);
+                        lastKnownUrl = currentSrc;
                         
-                        log('Login page detected in iframe, user may have logged out');
-                        handleLogoutDetected();
+                        // Check for login/auth pages
+                        if (isLoginPage(currentSrc) && appLoadedSuccessfully) {
+                            log('Login page detected after successful app load - user logged out');
+                            handleLogoutDetected();
+                        }
                     }
+                    
+                    // Also try to check if the iframe content shows login elements
+                    checkIframeContent(iframe);
+                    
                 } catch (error) {
-                    // Expected due to CORS, but we can still monitor src changes
+                    // Expected due to CORS
                 }
-            }, 2000);
+            }, 1500);
+        }
+        
+        // Check if URL indicates a login page
+        function isLoginPage(url) {
+            const loginPatterns = [
+                '/auth/',
+                '/login',
+                '/signin',
+                '/oauth',
+                'auth?',
+                'login?',
+                'signin?'
+            ];
+            
+            return loginPatterns.some(pattern => url.includes(pattern));
+        }
+        
+        // Try to detect logout by checking iframe content (when possible)
+        function checkIframeContent(iframe) {
+            try {
+                // This will usually fail due to CORS, but worth trying
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (iframeDoc) {
+                    const title = iframeDoc.title.toLowerCase();
+                    const body = iframeDoc.body ? iframeDoc.body.innerHTML.toLowerCase() : '';
+                    
+                    if (title.includes('login') || title.includes('sign in') || 
+                        body.includes('login') || body.includes('sign in')) {
+                        if (appLoadedSuccessfully) {
+                            log('Login content detected in iframe');
+                            handleLogoutDetected();
+                        }
+                    }
+                }
+            } catch (error) {
+                // Expected due to CORS
+            }
         }
         
         // Stop frame monitoring
@@ -249,10 +313,15 @@
             if (isLoggedOut) return; // Prevent multiple triggers
             
             isLoggedOut = true;
+            appLoadedSuccessfully = false;
             log('Logout detected, clearing auth state and showing login interface');
             
             clearAuthState();
             stopFrameMonitoring();
+            
+            // Reset iframe
+            const iframe = document.getElementById('app-frame');
+            iframe.src = 'about:blank';
             
             // Update UI to show logout message
             const stepInfo = document.getElementById('step-info');
@@ -267,7 +336,9 @@
             }
             
             // Show login interface
-            showTeamsLogin();
+            setTimeout(() => {
+                showTeamsLogin();
+            }, 500);
         }
         
         // Listen for iframe load events
@@ -278,17 +349,48 @@
                 const currentSrc = iframe.src;
                 log(`Iframe loaded: ${currentSrc}`);
                 
-                // If we detect a login page after the main app was loaded, it's likely a logout
-                if (currentSrc.includes('/auth/') || 
-                    currentSrc.includes('/login') || 
-                    currentSrc.includes('signin')) {
+                if (currentSrc && currentSrc !== 'about:blank') {
+                    lastKnownUrl = currentSrc;
                     
-                    // Small delay to ensure it's not just an initial redirect
-                    setTimeout(() => {
-                        if (iframe.src === currentSrc) {
+                    // Check if this is a login page load
+                    if (isLoginPage(currentSrc)) {
+                        if (appLoadedSuccessfully) {
+                            log('Login page loaded after app was running - logout detected');
+                            setTimeout(() => {
+                                if (iframe.src === currentSrc && isLoginPage(currentSrc)) {
+                                    handleLogoutDetected();
+                                }
+                            }, 2000);
+                        }
+                    } else {
+                        // Mark app as successfully loaded if it's not a login page
+                        setTimeout(() => {
+                            if (!isLoginPage(iframe.src)) {
+                                appLoadedSuccessfully = true;
+                                log('App loaded successfully');
+                            }
+                        }, 3000);
+                    }
+                }
+            });
+            
+            iframe.addEventListener('error', () => {
+                log('Iframe load error detected');
+            });
+        }
+        
+        // Add postMessage listener for logout detection
+        function setupPostMessageListener() {
+            window.addEventListener('message', (event) => {
+                try {
+                    if (event.data && typeof event.data === 'object') {
+                        if (event.data.type === 'logout' || event.data.action === 'logout') {
+                            log('Logout message received via postMessage');
                             handleLogoutDetected();
                         }
-                    }, 1000);
+                    }
+                } catch (error) {
+                    // Ignore invalid messages
                 }
             });
         }
@@ -333,6 +435,12 @@
             hideLoading();
             document.getElementById('teams-login').classList.remove('hidden');
             updateButtonStates();
+            
+            // Reset the step info if it was showing logout message
+            const stepInfo = document.getElementById('step-info');
+            if (stepInfo && stepInfo.className.includes('logout-info')) {
+                // Keep the logout message for better UX
+            }
         }
         
         function hideTeamsLogin() {
@@ -343,16 +451,19 @@
             hideLoading();
             hideTeamsLogin();
             isLoggedOut = false; // Reset logout flag
+            appLoadedSuccessfully = false; // Will be set to true after successful load
             
             const iframe = document.getElementById('app-frame');
             iframe.src = 'https://ai-openwebcontainer.victoriousmeadow-5aedd328.eastasia.azurecontainerapps.io';
+            lastKnownUrl = iframe.src;
             log('Loading main application');
             
-            // Start monitoring for logout
+            // Start monitoring for logout after a delay
             setTimeout(() => {
                 startFrameMonitoring();
                 setupIframeListener();
-            }, 3000); // Wait a bit for the app to fully load
+                setupPostMessageListener();
+            }, 2000);
         }
         
         // Update button states
@@ -532,9 +643,29 @@
             if (isTeams) {
                 updateLoadingStatus('Teams environment detected');
                 
+                // Check if user was recently logged out
+                if (wasRecentlyLoggedOut()) {
+                    log('Recent logout detected, showing login interface');
+                    updateLoadingStatus('Session expired, please login again...');
+                    setTimeout(() => {
+                        const stepInfo = document.getElementById('step-info');
+                        if (stepInfo) {
+                            stepInfo.className = 'logout-info';
+                            stepInfo.innerHTML = `
+                                <div class="logout-title">🔄 Session Expired</div>
+                                <div class="logout-desc">
+                                    You have been logged out. Please authenticate again to continue.
+                                </div>
+                            `;
+                        }
+                        showTeamsLogin();
+                    }, 1000);
+                    return;
+                }
+                
                 // Check if already authenticated
                 if (isAlreadyAuthenticated()) {
-                    log('User already authenticated, skipping login');
+                    log('User already authenticated, attempting to load app');
                     updateLoadingStatus('Already authenticated, loading app...');
                     setTimeout(() => {
                         showMainApp();
